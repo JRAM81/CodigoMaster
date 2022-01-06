@@ -1,0 +1,682 @@
+---
+title: "Ensemble Machine Learning Final 1"
+author: "JoseRamonAcostaMotos"
+date: "12/12/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1 Ensemble Learning
+
+A continuación se agrupan todos los librerías que se necesitan para los siguientes pasos `library()` que ya se han instalado con `install.packages()` y requeridas con `require()`. Las librerias necesarias son las siguientes: `Superlearner`, `ranger`, `arm`,`ipred`, `dplyr`, `caret`,`ggplot`,`RhpcBLASctl`,`xgboost`. 
+
+```{r,include=FALSE}
+library(SuperLearner)
+library(ranger)
+library(arm)
+library(ipred)
+library(dplyr)
+library(caret)
+library(ggplot2)
+library(RhpcBLASctl)
+library(xgboost)
+```
+
+### ¿Qué son los ensembles?
+
+Un **ensemble (E)** se produce cuando las predicciones probabilísticas o numéricas de múltiples modelos de **machine learning (ML)** se combinan promediando, ponderando y sumando cada modelo o utilizando la observación más común entre los modelos. Esto proporciona un escenario de votos múltiples que probablemente conduzca hacia una correcta predicción de la clase correcta. Los **E** tienden a funcionar mejor cuando hay desacuerdos entre los modelos que se ajustan. El concepto de **ensemble learning models (ELM)** también parece funcionar bien en la práctica a menudo por encima de las implementaciones de algoritmos individuales.
+
+Los conjuntos pueden crearse manualmente ajustando múltiples modelos pero primero se hacen predicciones individuales con cada uno de ellos para después combinarlos.
+
+### ¿Porqué SuperLearner?
+
+**SuperLearner (SL)** es un algoritmo que utiliza la validación cruzada para estimar el rendimiento de múltiples modelos de **ML**, o del mismo modelo con diferentes ajustes. A continuación, crea una media ponderada óptima de esos modelos, que también se denomina **E**, utilizando el rendimiento de los **test data (TD)**. 
+
+Considerar esta lista de ventajas: 
+
+1.- **SL** permite ajustar un modelo de conjunto simplemente añadiendo algoritmos.
+
+2.- **SL** utiliza la validación cruzada, que se utiliza intrínsecamente para estimar el riesgo de todos los modelos. Esto hace que **SL** sea ideal para la comparación de modelos.
+
+3.- **SL** hace que el **E** sea eficiente al estimar automáticamente los pesos del conjunto. Esta es una tarea que normalmente puede ser muy tediosa y requiere mucha experimentación.
+
+4.- **SL** elimina automáticamente los modelos que no contribuyen al poder de predicción del **E**, lo que le deja libre para experimentar con numerosos algoritmos.
+
+### Ensemble Learning en R con SuperLearner
+
+**SL** puede ser instalado desde CRAN con la función `install.packages()` para luego cargarlo en nuestro espacio de trabajo utilizando la función `library()`:
+
+## 2 Preparación de los datos
+
+Los datos fueron donados por investigadores de la Universidad de Wisconsin e incluyen las mediciones de imágenes digitalizadas de un aspirado con aguja fina de una masa de pulmón. Los valores representan las características de los núcleos celulares presentes en la imagen digital.
+
+Los datos del cáncer de pulmón incluyen 683 **examples** de biopsias de cáncer, cada uno con 10 **features**. Una **feature** es el diagnóstico del cáncer y las 9 restantes son mediciones de laboratorio con valores numéricos. El diagnóstico se codifica como **Malignant** para indicar que es maligno o **Benign** para indicar que es benigno.Es una columna binaria con dos opciones, lo que significa que sigue una distribución binomial.
+
+Una distribución binomial es una colección de ensayos Bernoulli, que son una prueba de éxito o fracaso en probabilidad. Una distribución binomial se identifica fácilmente porque sólo hay dos respuestas posibles, en este caso Sí o No. Esto es importante porque **SL** requiere que defina la familia de problemas a la que debe pertenecer el modelo.
+
+Se analizan 10 características diferentes de los núcleos celulares digitalizados. Éstas incluyen:
+
+   * Cl.thickness 
+   * Cell.size      
+   * Cell.shape     
+   * Marg.adhesion  
+   * Epith.c.size   
+   * Bare.nuclei    
+   * Bl.cromatin    
+   * Normal.nucleoli
+   * Mitoses  
+   
+Según estos nombres, todas las **features** parecen estar relacionadas con la forma y el tamaño de los núcleos celulares. A menos que sea un oncólogo, es poco probable que se pueda conocer cómo se relacionan cada una de ellas con las masas benignas o malignas. Estos patrones se revelarán a medida que continuemos en el proceso de **ML**.
+
+Hay que explorar los datos y ver si se puede arrojar algo de luz sobre las relaciones. 
+
+Primero se comienza importando el archivo de datos **CSV data file** guardando los datos de cáncer de mama de Wisconsin en el marco de datos breastcancer1:
+
+
+```{r}
+bc<- read.csv("C:/Users/jram1/Desktop/breastcancer1.csv", stringsAsFactors = FALSE)
+head(bc)
+tail(bc)
+```
+La variable class se ha transformado en factor en lugar de character por aquí lo requiere SL y las 9 otras variables son numéricas. Utilizando el comando `str(bc)`se confirma que los datos están estructurados con 683 **examples** y 10 **features** como esperábamos:
+
+```{r}
+class(bc$Class)
+bc$Class<-as.factor(bc$Class)
+class(bc$Class)
+str(bc)
+```
+**SL** también requiere que se codifique la variable respuesta, en este caso diagnosis si se trata de un problema de clasificación. Dado que está resolviendo un problema de clasificación binomial codificará el factor a la codificación numérica 0-1:
+
+Como **Class column** ahora es un factor, R la codificará en 1 y 2, pero esto no es lo que se necesita: lo ideal es trabajar con el tipo de codificado 0 y 1, que son "Benign" y "Malignant", respectivamente. En la instrucción del código anterior, se resta 1 del conjunto para obtener la codificación 0-1.
+
+
+
+```{r}
+bc$Class<-as.numeric(bc[,10])-1
+bc$Class
+```
+Con la función `summary()` se obtiene el siguiente resumen de las variables numéricas
+
+```{r}
+summary(bc[,1:10])
+```
+
+## 3 Preparando training and test datasets
+
+El siguiente paso es muy importante dividiendo los datos en dos partes y basado el corte en la variable resultado o dependiene. Se hace un reparto del 75% para el **train** y 25% para el **test**.Para llevar a cabo este punto se utiliza la función `createDataPartition`:
+
+```{r}
+#Spliting training set into two parts based on outcome: 75% and 25%
+index <- createDataPartition(bc$Class, p=0.75, list=FALSE)
+train <- bc[ index,]
+test <- bc[-index,]
+head(train)
+tail(train)
+head(test)
+tail(test)
+```
+## 4 Transformación – normalización de los datos numéricos
+
+Observando las distintas variables numéricas no hay un problema en la escala de medición de las variables. Si hubiera un problema de escala esto podría causar problemas para nuestro **E** así que habría que aplicar la **normalización** para reescalar las características a un rango de valores estándar. Aunque no sea necesario para estos datos se aplicará la normalización
+
+Para normalizar estas características, hay que crear una función que tendrá por nombre `normalize()` en R. Esta función toma un vector x de valores numéricos, y para cada valor en x, resta el valor mínimo en x y lo divide por el rango de valores en x. Finalmente, se devuelve el vector resultante. El código de esta función es el siguiente:
+
+```{r}
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x)))
+}
+```
+
+Después de ejecutar el código anterior, la función `normalize()` está disponible para su uso en R. Ahora se comprueba la función en un par de vectores:
+
+```{r}
+normalize(c(1, 2, 3, 4, 5))
+normalize(c(10, 20, 30, 40, 50))
+```
+
+La función parece funcionar correctamente. A pesar de que los valores del segundo vector son 10 veces mayores que los del primero, después de la normalización, ambos parecen exactamente iguales.
+
+Ahora podemos aplicar la función `normalize()` a las características numéricas de nuestro marco de datos. En lugar de normalizar cada una de las 30 variables (finalmente 10) numéricas individualmente utilizaremos una de las funciones de R para automatizar el proceso.
+
+La función `lapply()` toma una lista y aplica una función especificada a cada elemento de la lista. Como un marco de datos es una lista de vectores de igual longitud, podemos utilizar `lapply()` para aplicar `normalize()` a cada característica del marco de datos. El último paso es convertir la lista devuelta por `lapply()` en un marco de datos, utilizando la función `data.frame()`. El proceso completo es el siguiente:
+
+```{r}
+train_n <- as.data.frame(lapply(train[1:9], normalize))
+class(train_n)
+test_n <- as.data.frame(lapply(test[1:9], normalize))
+class(train_n)
+```
+
+Para confirmar que la transformación se aplicó correctamente se pueden las estadísticas de resumen de la variable area que era la que nos daba problemas con la función `summary()`:
+
+```{r}
+summary(train_n)
+summary(test_n)
+```
+
+Otro paso importante es comprobar que no existen datos perdidos en nuestro **dataset** usando la función `sum(is.na())`:
+
+```{r}
+# Buscando datos perdidos
+sum(is.na(train_n))
+sum(is.na(test_n))
+```
+
+No se han observados datos perdidos
+
+## 5 Requirimientos previos para poder usar Superlearner y lista de algoritmos que incluye. 
+
+**SL** también requiere que se codifique la variable de respuesta, en este caso diagnosis, si se trata de un problema de clasificación. Dado que está resolviendo un problema de clasificación binomial el factor mostrará una codificación numérica de 0-1:
+
+```{r}
+y <- as.numeric(train[,10])
+ytest <- as.numeric(test[,10])
+```
+
+El paquete **SL** también requiere que los predictores (X) estén en sus propias estructuras de datos. Ya se ha dividido Y, ahora es necesario dividir X incluido el conjunto de pruebas. 
+
+Importante para este ejercicio es que se ha elminado el primer predictor que mide el radio medio por dar resultados muy similares al predictor que mide el perímetro medio. De esta forma se evitarán problemas de sobreajuste. 
+
+```{r}
+x <- data.frame(train_n[,1:9])
+head(x)
+tail(x)
+xtest <- data.frame(test_n[,1:9])
+head(xtest)
+tail(xtest)
+```
+Algunos algoritmos no sólo requieren un **data.frame**, sino que requieren una matriz de modelo guardada como un **data.frame**. Un ejemplo es el algoritmo **nnet**. Cuando se resuelve un problema de regresión casi siempre se utiliza la matriz del modelo para almacenar los datos para **SL**. Todo lo que hace una matriz de modelo es dividir las variables factoriales en sus propias columnas y recodificarlas como valores 0-1 en lugar de valores de texto. No afecta a las columnas numéricas. La matriz del modelo aumentará el número de columnas que un algoritmo tiene que tratar, por lo que podría aumentar el tiempo de cálculo. Para un conjunto de datos pequeño, como éste, el impacto es mínimo, pero los conjuntos de datos más grandes podrían verse muy afectados. Lo importante es que hay que decidir qué algoritmos se van a probar antes de ajustar el modelo. 
+
+Para empezar a crear el modelo se puede utilizar el siguiente comando `listWrappers()` para obtener una vista previa de los modelos disponibles en el paquete **SL**:
+
+```{r}
+listWrappers()
+```
+## 6 Algoritmos seleccionados para crear el modelo. Primero se evalúan individualmente y luego juntos formando un ensemble learning model.  
+
+El primer algoritmo a ajustar es **Ranger**, que es una implementación más rápida del famoso **Random Forest**
+
+**Random Forest** es un potente método que en realidad es un conjunto de árboles de decisión. Los árboles de decisión funcionan observando los datos y calculando un reparto de probabilidades entre cada variable del modelo, lo cual ofrece un camino hacia la predicción. Los árboles de decisión tienen la costumbre de sobreajustar los datos, lo que significa que no generalizan bien para nuevos datos. **Random Forest** resuelve este problema haciendo crecer múltiples árboles de decisión basados en numerosas muestras de datos y luego promedia esas predicciones para encontrar la predicción correcta. Además, sólo selecciona un subconjunto de características para cada muestra, lo que lo diferencia del agrupamiento de árboles. Esto crea un modelo que no se sobreajusta en exceso a los datos.
+
+Dado que **Random Forest**, y por lo tanto **Ranger**, contienen muestreo aleatorio en el algoritmo, no obtendrá el mismo resultado si se ajusta más de una vez. Por lo tanto, hay que establecer la semilla para que se puedan reproducir los resultados por otros investigadores y también comparar múltiples modelos usando la misma semilla aleatoria. R utiliza **set.seed()** para establecer la semilla aleatoria. La semilla puede ser cualquier número en este caso se utilizará 150.
+
+**SL** requiere una variable Y, que es la respuesta o resultado que se desea estudiar; una variable X, que son las variables predictoras; la familia a utilizar `family = binomial()`, que puede ser gauasiana o binomial y la librería a utilizar en forma de lista `SL.library = list()`. 
+
+En este caso son **SL.ranger** del paquete ranger, **Kernel Support Vector Machines (KSVM)** del paquete `kernlab`, **Bayes Generalized Linear Models (GLM)** del paquete `arm` y **bagging**del paquete `ipred`
+
+Usar el modelo gaussiano no habría producido predicciones adecuadas en el rango 0-1 que es el que se está usando en este ejercicio. 
+
+A continuación, la simple impresión del modelo proporciona el coeficiente **Coef**  que es el peso del algoritmo en el modelo y el factor de riesgo **Risk** que es el error que produce el algoritmo.
+
+```{r}
+set.seed(150)
+single.model <- SuperLearner(y,x,family=binomial(),SL.library=list("SL.ranger"))
+single.model
+```
+
+```{r}
+set.seed(150)
+single.model <- SuperLearner(y,x,family=binomial(),SL.library=list("SL.ksvm"))
+single.model
+```
+
+```{r}
+set.seed(150)
+single.model <- SuperLearner(y,x,family=binomial(),SL.library=list("SL.ipredbagg"))
+single.model
+```
+
+```{r}
+set.seed(150)
+single.model <- SuperLearner(y,x,family=binomial(),SL.library=list("SL.bayesglm"))
+single.model
+```
+El riesgo es una medida de la precisión o el rendimiento del modelo. Queremos que nuestros modelos minimicen el riesgo estimado, lo que significa que el modelo comete el menor número de errores en su predicción. Es básicamente el error medio al cuadrado en un modelo de regresión. 
+
+En este caso, el factor de riesgo calculado es inferior a 0,20. Por supuesto este buen resultado tendrá que ser probado a través de la validación cruzada externa y en el conjunto de pruebas, pero es un buen comienzo. La ventaja de **SL** es que trata de construir automáticamente un **E** mediante el uso de la validación cruzada. Por supuesto, si sólo hay un modelo, éste recibe todo el peso del **E**.
+
+Así que este modelo único es muy bueno pero se puede realizar sin **SL**. ¿Cómo se pueden ajustar los modelos **E**?
+
+## 7 Entrenar un ensemble con R usando como algoritmos Ranger, Kernel Support Vector Machines, Bayes GLM and Bagging
+
+**E** con **SL** es tan sencillo como seleccionar los algoritmos a utilizar. En este caso, vamos a añadir **Kernel Support Vector Machines (KSVM)** del paquete `kernlab`, **Bayes Generalized Linear Models (GLM)** del paquete `arm` y **bagging** del paquete `ipred`.
+
+Pero, ¿qué son el KSVM, el Bayes GLM y el bagging?
+
+El **KSVM** utiliza algo llamado "el truco del kernel" para calcular la distancia entre puntos. En lugar de tener que dibujar un mapa de las características y calcular las coordenadas, el método del núcleo calcula los productos internos entre los puntos. Esto permite un cálculo más rápido. A continuación, la máquina de vectores de apoyo se utiliza para aprender el límite no lineal entre los puntos en la clasificación. Una máquina de vectores de apoyo intenta crear un espacio entre dos clases en un problema de **machine learning** que suele ser no lineal. A continuación, clasifica los nuevos puntos a ambos lados de esa brecha en función de su posición en el espacio.
+
+El modelo **Bayes GLM** es simplemente una implementación de la regresión logística. Al menos en este caso, en el que se clasifica un problema de 0 a 1. El **GLM de Bayes** difiere del **KSVM** en que utiliza un algoritmo de regresión aumentada para actualizar los coeficientes en cada paso.
+
+El **bagging** es similar al **random forest** anterior sin subdividir las características. Esto significa que creará múltiples árboles de decisión a partir de muestras aleatorias y los promediará juntos para obtener su predicción.
+
+Para el ejercicio se vuelve a utilizar **ranger** junto con los otros tres algoritmos o modelos.
+
+```{r}
+set.seed(150)
+model <- SuperLearner(y,x,family=binomial(),SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm"))
+model
+```
+Por orden de mayor a menor en los coeficientes se obtiene que `SL.bayesglm_All`>`SL.ranger_All`>  `SL.ksvm_All`> `SL.ipredbagg_All`. **SL** calcula el riesgo y decide la combinación óptima de modelos que reducirán el error.
+
+Para conocer la contribución específica de cada modelo y la variación, puede utilizar la función interna de validación cruzada de SuperLearner `CV.SuperLearner() `. Para establecer el número de folds, puede utilizar el argumento V. En este caso se establecerá en 5
+
+Lo que no se tiene todavía es una estimación del rendimiento del conjunto en sí. En este momento sólo se tiene la esperanza de que los pesos del conjunto mejoren con respecto al mejor algoritmo individual.
+
+Para estimar el rendimiento del conjunto SuperLearner se necesita una capa "externa" de validación cruzada, también llamada **nested cross-validation** o validación cruzada anidada. Para ello se genera una muestra separada que no se utiliza para ajustar el SuperLearner, lo que permite que sea una buena estimación del rendimiento del SuperLearner en datos no vistos. Normalmente, se realiza una validación cruzada externa de 10 o 20 veces, pero incluso 5 veces es razonable.
+
+Otro buen resultado es que se obtienen errores estándar en el rendimiento de los algoritmos individuales y podemos compararlos con los que calcula el SuperLearner.
+
+```{r}
+set.seed(150)
+cv.model <- CV.SuperLearner(y,x,V=5,SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm"))
+summary(cv.model)
+```
+
+El resumen de la validación cruzada muestra el riesgo medio del modelo, la variación del modelo y el rango del riesgo.
+
+Al trazarlo con la función `plot()` también se obtiene un interesante gráfico de los modelos utilizados y su variación:
+
+```{r}
+plot(cv.model)
+```
+Se observan dos resultados de SuperLearner: "SuperLearner" y "Discrete SL". "Discrete SL" elige el mejor "learner" individual. "Super Learner" toma una media ponderada de los "learnes" utilizando los coeficientes/pesos que hemos examinado anteriormente. En general, "Super Learner" debería funcionar un poco mejor que "Discrete SL".
+
+Es fácil ver que el **Bayes GLM** es el modelo que mayor valor muestra en el riesgo medio del modelo. Lo bueno de **SL** es que si un modelo no se ajusta bien o no contribuye mucho ¡simplemente se pondera a cero! No hay necesidad de eliminarlo y volver a entrenar, a menos que se planee volver a entrenar el modelo en el futuro. Sólo un entrenamiento adecuado del modelo implica la validación cruzada de todo el modelo. 
+
+```{r}
+set.seed(150)
+system.time({ cv_model = CV.SuperLearner(y,x,V=5,SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm"))
+})
+```
+Revisar la distribución del mejor learner único con validación cruzada externa.
+
+```{r}
+table(simplify2array(cv_model$whichDiscreteSL))
+```
+## 8 Hacer predicciones con Superlearner con el modelo anteriormente preparado
+
+Con el comando específico `predict.SuperLearner()` puede realizar fácilmente predicciones sobre nuevos conjuntos de datos. ¡Esto significa que no puede utilizar la función habitual en la obtención de predicciones `predict()`!
+
+```{r}
+predictions <- predict.SuperLearner(model, newdata=xtest)
+```
+
+La función `predict.SuperLearner()` toma un argumento de modelo (un modelo ajustado de **SL**) y nuevos datos para predecir. Predictions devolverá primero las predicciones globales del conjunto:
+
+
+```{r}
+head(predictions$pred)
+```
+También devolverá las predicciones individuales de cada modelo que además se pueden reprsentar gráficamente usando la librería `ggpplot2`:
+
+```{r}
+head(predictions$library.predict)
+```
+```{r}
+library(ggplot2)
+qplot(predictions$pred[, 1]) + theme_minimal()
+```
+```{r}
+pred_rocr = ROCR::prediction(predictions$pred, ytest)
+auc = ROCR::performance(pred_rocr, measure = "auc", x.measure = "cutoff")@y.values[[1]]
+auc
+```
+El AUC puede oscilar entre 0,5 (no mejor que el azar) y 1,0 (perfecto). Por lo tanto, con un 1 se obtiene un valor perfecto.
+
+Esto permite ver cómo cada modelo clasificó cada observación. Esto podría ser útil para depurar el modelo o ajustar varios modelos a la vez para ver cuál es la mejor opción.
+
+Los valores de predicción que se devuelven están en forma de probabilidades. Eso significa que necesitará un umbral de corte para determinar si debe clasificar un uno o un cero. Esto sólo debe hacerse en el caso de la clasificación binomial, no en el de la regresión.
+
+Normalmente, esto se determinaría en el entrenamiento con validación cruzada, pero para simplificar, se utilizará un corte de 0,50. Dado que se trata de un problema binomial simple, utilizará la función `ifelse()` de la librería `dplyr` para recodificar sus probabilidades:
+
+```{r}
+conv.preds <-ifelse(predictions$pred>=0.5,1,0)
+head(conv.preds)
+tail(conv.preds) 
+```
+Ahora se puede construir una matriz de confusión con la librería `caret` para revisar los resultados pero previamente se debe de comprobar que tanto las predicciones recodificadas como los datos test de la variable dicotómica (ytest) pertenecen a la clase factor:
+
+```{r}
+conv.preds2<-as.factor(conv.preds)
+class(conv.preds2)
+ytest2<-as.factor(ytest)
+class(ytest2)
+```
+```{r}
+cm <- confusionMatrix(conv.preds2, ytest2)
+cm
+```
+Estás obteniendo alrededor de 0,9647 de precisión en este conjunto de datos, que es un buen rendimiento para el mismo. Con un entrenamiento adecuado con validación cruzada y probando algunos modelos diferentes, es fácil ver cómo se puede mejorar rápidamente esta puntuación.
+
+## 9 Ajustar hiperparámetros
+
+Aunque el rendimiento del modelo no es malo se puede intentar mejorar ajustando algunos hiperparámetros de algunos de los modelos que tiene el **E**. **Ranger** no fue ponderado fuertemente en el modelo pero tal vez es porque se necesitan más árboles y también hay que afinar el parámetro mtry. Tal vez también se puede mejorar el **E** aumentando el parámetro nbagg del modelo bagg a 250 teniendo en cuenta que el valor por defecto es 25.
+
+Hay dos métodos para hacerlo: o bien se define una función que llame al learner y modifique un parámetro, o bien se utiliza la función `create.Learner()`.
+
+### Definiendo una función
+
+La primera opción es con la ayuda de `function()`. Aquí se define una función que llama al learner y modifica un parámetro. La llamada a la función utiliza la elipsis ... para pasar argumentos adicionales a una función. Esos tres puntos permiten modificar una fórmula sin tener que especificar en la función cuáles son esas modificaciones. Esto significa que si se modifican 10 parámetros, no se necesitan 10 objetos en la función para asignar dentro de la función. Es una forma generalizable de escribir una función.
+
+```{r}
+SL.ranger.tune <- function(...){
+      SL.ranger(..., num.trees=1000, mtry=2)
+}
+
+SL.ipredbagg.tune <- function(...){
+      SL.ipredbagg(..., nbagg=250)
+}
+```
+
+**SL.ranger.tune** es el nombre del método **ranger** modificado y **SL.ipredbagg.tune** es el nombre del método **ipredbagg** modificado. Ahora que se tienen algunas funciones de aprendizaje nuevas creadas hay que pasarlas a la fórmula de validación cruzada para ver si el rendimiento mejora.
+
+Hay que tener en cuenta que se mantendrán las funciones originales **SL.ranger** y **SL.ipredbagg** en el algoritmo para ver si el rendimiento mejora en sus versiones nuevas de los métodos.
+
+```{r}
+# Set the seed
+set.seed(150)
+
+# Tune the model
+cv.model.tune <- CV.SuperLearner(y,x,V=5,SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm","SL.ranger.tune","SL.ipredbagg.tune"))
+
+# Get summary statistics
+summary(cv.model.tune)
+```
+
+Representación gráfica del modelo:
+
+```{r}
+# Plot the tuned model
+plot(cv.model.tune)
+```
+**Ranger** parece mejorar al afinar los parámetros pero dejémoslo para ver si **SL** lo encuentra relevante.
+
+Una vez más, una ventaja de **SL** es que cualquier modelo si no es relevante le dará un valor de cero. Hay que recordar que los mejores **E** no se componen de los algoritmos con mejor rendimiento sino de los algoritmos que mejor se complementan para clasificar una predicción.
+
+A continuación se va ajustar el nuevo modelo con los nuevos algoritmos y se verá el rendimiento:
+
+```{r}
+set.seed(150)
+model.tune <- SuperLearner(y,x,SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm","SL.ranger.tune","SL.ipredbagg.tune"))
+model.tune
+```
+**SL.ranger.tune_All** > **SL.ksvm_All** son los algoritmos con mayores coeficientes.
+La predicción en el **test set** da el siguiente resultado:
+
+```{r}
+predictions.tune <- predict.SuperLearner(model.tune, newdata=xtest)
+conv.preds.tune <- ifelse(predictions.tune$pred>=0.5,1,0)
+conv.preds.tune2<-as.factor(conv.preds.tune)
+class(conv.preds.tune2)
+confusionMatrix(conv.preds.tune2,ytest2)
+```
+Los cambios realizados han mejorado algo los resultados. Da un valor de accuracy más alto de 0.97. 
+
+### create.Learner()
+
+El segundo método para ajustar los hiperparámetros es utilizar la función `create.Learner()`. Esto le permite personalizar un **SL** existente:
+
+```{r}
+learner <- create.Learner("SL.ranger", params=list(num.trees=1000, mtry=2))
+
+learner2 <- create.Learner("SL.ipredbagg", params=list(nbagg=250))
+```
+
+La cadena de caracteres del **learner** es el primer argumento de la función `create.Learner()`. Luego se pasa una lista de los parámetros a modificar. Esto creará un objeto llamdo **learner** y **learner2**:
+
+```{r}
+learner
+```
+
+Ahora, al pasar los objetos **learners** a **SL**, se selecciona names del objeto learner:
+
+```{r}
+set.seed(150)
+cv.model.tune2 <- CV.SuperLearner(y,x,V=5,SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm",learner$names,learner2$names))
+summary(cv.model.tune2)
+```
+
+Representación del nuevo modelo con la función `plot()`:
+
+```{r}
+# Plot `cv.model.tune2`
+plot(cv.model.tune2)
+```
+
+El resultado final es el mismo que si se utiliza en el primer método. Depende de uno mismo el escoger una opción u otra. 
+
+Se vuelve a calcular los coeficientes y los riesgos de cada modelo del **E**: 
+
+```{r}
+set.seed(150)
+model.tune2 <- SuperLearner(y,x,SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm",learner$names,learner2$names))
+model.tune2
+```
+Se vuelven a calcular las predicciones con la matriz de confusión: 
+
+```{r}
+predictions.tune2 <- predict.SuperLearner(model.tune2, newdata=xtest)
+conv.preds.tunenw <- ifelse(predictions.tune2$pred>=0.5,1,0)
+conv.preds.tunenw2<-as.factor(conv.preds.tunenw)
+class(conv.preds.tunenw2)
+confusionMatrix(conv.preds.tunenw2,ytest2)
+```
+## 10 Paralelización
+
+SuperLearner facilita el uso de múltiples núcleos de CPU de un ordenador para acelerar los cálculos. Primero hay que configurar R para múltiples núcleos, y luego decirle a CV.SuperLearner que divida sus cálculos entre esos núcleos.
+
+Hay dos maneras de utilizar múltiples núcleos en R: el sistema "multicore" y el sistema "snow". Windows sólo es capaz de emplear el sistema "snow", que es más difícil de usar, mientras que macOS y Linux pueden usar cualquiera de los dos.
+
+Primero mostramos la versión del sistema "multicore":
+
+```{r}
+# Configurar el cálculo paralelo - utilizar todos los núcleos de nuestro ordenador.
+(num_cores = RhpcBLASctl::get_num_cores())
+```
+```{r}
+# Usa 2 de estos cores for paralles SuperLearner
+# Sustituir "2" por "num_cores" (sin comillas) para utilizar todos los núcleos.
+options(mc.cores = 2)
+# Comprueba cuántos trabajadores paralelos estamos utilizando (en windows).
+getOption("mc.cores")
+```
+```{r}
+# Necesitamos establecer un tipo de semilla diferente que funcione en todos los núcleos.
+# De lo contrario, los otros núcleos se volverán rebeldes y no obtendremos resultados repetibles.
+# Esta versión es para el sistema paralelo "multicore" en R.
+set.seed(150, "L'Ecuyer-CMRG")
+system.time({
+cv_model = CV.SuperLearner(y,x,V=5,parallel="multicore",SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm"))
+})
+# Resumen de los resultados
+summary(cv_model)
+```
+Los tiempos a la hora de ejecutar el modelo no se acortan como cabía esperar. 
+
+Aquí está el equivalente a la "snow":
+
+```{r}
+# Hacer un snow cluster
+# De nuevo, sustituye 2 con num_cores para usar todos los cores disponibles
+cluster = parallel::makeCluster(2)
+# Comprueba el objeto cluster.
+cluster
+# Cargar el paquete SuperLearner en todos los trabajadores para que puedan encontrarla
+# SuperLearner::All(), es la función de detección por defecto que mantiene todas las variables.
+parallel::clusterEvalQ(cluster, library(SuperLearner))
+# Necesitamos establecer un tipo diferente de semilla que funcione a través de los núcleos.
+# Esta versión es para SNOW parallelization.
+# De lo contrario, los otros núcleos se volverán rebeldes y no obtendremos resultados repetibles.
+parallel::clusterSetRNGStream(cluster, 150)
+system.time({
+cv_model = CV.SuperLearner(y,x,V=5,parallel=cluster,SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm"))
+})
+# Resumen de los resultados
+summary(cv_model)
+# Detener a los cluster workers ahora que hemos terminado.
+parallel::stopCluster(cluster)
+```
+
+Si queremos utilizar varios núcleos para el SuperLearner normal, no para el CV.SuperLearner (es decir, la validación cruzada externa para estimar el rendimiento), tenemos que cambiar el nombre de la función a mcSuperLearner (versión "multiscore") o snowSuperLearner (versión "snow").
+
+Primero la versión "multicore":
+
+```{r}
+# Fija la semilla compatible con multicore 
+set.seed(150, "L'Ecuyer-CMRG")
+# Fija la función SuperLearner.
+(sl =mcSuperLearner(Y = y, X = x, family = binomial(), SL.library = list("SL.ranger", "SL.ksvm",  
+    "SL.ipredbagg", "SL.bayesglm"))) 
+# Vemos que el tiempo se reduce con respecto a nuestro superaprendiz inicial de un solo núcleo.
+sl$times$everything
+```
+
+Ahora la versión "snow", que debería ser paralela en todos los sistemas operativos.
+
+```{r}
+# Hacer un snow cluster
+# Recuerda, sustituye 2 con num_cores para usar todos los cores disponibles
+(cluster = parallel::makeCluster(2))
+# Cargar el paquete SuperLearner en todos los trabajadores para que puedan encontrarla
+# SuperLearner::All(), es la función de detección por defecto que mantiene todas las variables.
+parallel::clusterEvalQ(cluster, library(SuperLearner))
+# Necesitamos establecer un tipo diferente de semilla que funcione a través de los núcleos.
+# Esta versión es para SNOW parallelization.
+# De lo contrario, los otros núcleos se volverán rebeldes y no obtendremos resultados repetibles
+parallel::clusterSetRNGStream(cluster, 150)
+# Fijar la función SuperLearner.
+(sl =snowSuperLearner(Y = y, X = x, family = binomial(),cluster=cluster, SL.library = list("SL.ranger", "SL.ksvm","SL.ipredbagg", "SL.bayesglm")))
+# Vemos que el tiempo se reduce con respecto a nuestro superaprendiz inicial de un solo núcleo.
+sl$times$everything
+```
+SuperLearner también admite la ejecución en varios ordenadores a la vez, lo que se denomina computación "multi-node" o "cluster". 
+
+## 11 Distribución del peso para SuperLearner
+
+Los pesos o coeficientes del SuperLearner son estocásticos - cambiarán a medida que cambien los datos. Así que no necesariamente confiamos en que un conjunto dado de pesos sea el "verdadero", pero cuando usamos CV.SuperLearner al menos tenemos múltiples muestras de la distribución de los pesos.
+
+Podemos escribir una pequeña función para extraer los pesos en cada iteración de CV.SuperLearner y resumir la distribución de esos pesos. Esto puede ser añadido al paquete SuperLearner en algún momento en el futuro.
+
+```{r}
+# Revisar meta-weights (coefficients) de un objeto CV.SuperLearner 
+review_weights = function(cv_model) {
+  meta_weights = coef(cv_model)
+  means = colMeans(meta_weights)
+  sds = apply(meta_weights, MARGIN = 2,  FUN = sd)
+  mins = apply(meta_weights, MARGIN = 2, FUN = min)
+  maxs = apply(meta_weights, MARGIN = 2, FUN = max)
+  # Combina las estadísticas en una sola matriz.
+  model_stats = cbind("mean(weight)" = means, "sd" = sds, "min" = mins, "max" = maxs)
+  # Ordenar por peso medio decreciente.
+  model_stats[order(model_stats[, 1], decreasing = TRUE), ]
+}
+print(review_weights(cv_model), digits = 3)
+```
+
+Basándose en la columna de mínimos podemos ver que se utilizaron dos algoritmos SL.ranger_All, SL.ksvm_All que además son los que muestran mayor peso o importancia y en menor medida SL.bayesglm_All. 
+
+Se recomienda revisar la distribución de pesos de cualquier proyecto de SuperLearner para entender mejor qué algoritmos se eligen para el ensemble.
+
+## 12 Selección de características - feature selection (screening)
+
+Cuando los conjuntos de datos tienen muchas covariables, nuestros algoritmos pueden beneficiarse de elegir primero un subconjunto de covariables disponibles, un paso llamado selección de características. Entonces ejecutamos sólo esas variables al algoritmo de modelado, y es menos probable que se sobreajuste a variables que no están relacionadas con el resultado.
+
+Volvamos a visitar listWrappers() y comprobemos la sección inferior.
+
+```{r}
+listWrappers()
+```
+
+```{r}
+# Revisar el código de corP, que se basa en la correlación univariante.
+screen.corP
+```
+
+```{r}
+set.seed(150)
+
+# Fijar la función SuperLearner.
+# Necesitamos usar una lista() en lugar de un conjunto con c().
+cv_model = CV.SuperLearner(y,x,V=5,parallel="multicore",family = binomial(),SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm",c("SL.bayesglm","screen.corP")))
+
+summary(cv_model)
+```
+
+## 13 Optimizar para AUC
+
+En el caso de la predicción binaria, normalmente tratamos de maximizar el AUC, que puede ser la mejor métrica de rendimiento cuando nuestra variable de resultado tiene algún desequilibrio. En otras palabras, no tenemos exactamente un 50% de 1s y un 50% de 0s en nuestro resultado. Nuestro SuperLearner no tiene como objetivo el AUC por defecto, pero puede hacerlo si se lo indicamos especificando nuestro método.
+
+```{r}
+set.seed(150)
+require(data.table)
+require(cvAUC)
+require(ROCR)
+cv_model = CV.SuperLearner(y,x,V=5,family = binomial(), method="method.AUC",SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm",c("SL.bayesglm","screen.corP")))
+summary(cv_model)
+```
+Esto nos muestra convenientemente el AUC para cada algoritmo sin que tengamos que calcularlo manualmente. Pero, lamentablemente, no obtenemos SEs.
+
+Otro optimizador importante a tener en cuenta es la probabilidad logarítmica negativa, que está pensada para resultados binarios y a menudo funcionará mejor que NNLS (el predeterminado). Esto se especifica con el método = "NNloglik".
+
+```{r}
+set.seed(150)
+
+cv_model = CV.SuperLearner(y,x,V=5,family = binomial(), method="method.NNloglik",SL.library=list("SL.ranger","SL.ksvm","SL.ipredbagg","SL.bayesglm",c("SL.bayesglm","screen.corP")))
+summary(cv_model)
+```
+
+## 14 Exploración con el algoritmo XGBoost
+
+XGBoost es una versión de GBM que es aún más rápida y tiene algunas configuraciones adicionales. La adaptabilidad de GBM está determinada por su configuración, por lo que queremos probar a fondo una amplia gama de configuraciones para cualquier problema dado. Vamos a hacer 27 ahora. Esto tomará una buena cantidad de tiempo (~7 minutos en mi computadora) así que necesitamos usar al menos varios núcleos o si no varias computadoras.
+
+```{r}
+# 2 * 2 * 2 = 8 diferentes configuraciones.
+# Para análisis reales usaríamos de 100, 500, or 1000 trees - Esto es solo una demo.
+tune = list(ntrees = c(10, 20),
+            max_depth = 1:2,
+            shrinkage = c(0.001, 0.01))
+
+# Establecer detailed_names = TRUE para que podamos ver la configuración de cada función.
+# También acortar el name_prefix.
+learners = create.Learner("SL.xgboost", tune = tune, detailed_names = TRUE, name_prefix = "xgb")
+
+# 8 configurations - no está demasiado mal.
+length(learners$names)
+```
+
+```{r}
+learners$names
+```
+
+```{r}
+# Confirmar que tenemos varios núcleos configurados. Esto debería ser > 1.
+getOption("mc.cores")
+```
+
+```{r,include=FALSE}
+# Recuerda fijar una semilla multicore-compatible.
+set.seed(150, "L'Ecuyer-CMRG")
+# Establece la función CV.SuperLearner.
+system.time({
+   cv_model = CV.SuperLearner(y,x,family = binomial(),V=5,parallel="multicore",SL.library=list("SL.ranger","SL.ksvm",learners$names,"SL.ipredbagg","SL.bayesglm"))
+})
+summary(cv_model)   
+```
+
+```{r}
+review_weights(cv_model)
+```
+Podemos ver lo estocásticos que son los pesos para cada ejecución individual de SuperLearner.
+
+Por último, traza el rendimiento para las diferentes configuraciones. 
+
+```{r}
+plot(cv_model) + theme_bw()
+```
+
+
+
